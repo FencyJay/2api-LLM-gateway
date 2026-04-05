@@ -6,3 +6,9 @@ id = "V5OTkZjqUvR08tKh0EAND"
 uri = "file://.local/prompt_for_rebuild.md"
 type = "text"
 title = "AI 反向代理网关 — 精确重建与审核修复提示词"
+
+[[outputs]]
+id = "R67nhjuFTrLzrgvpCjuXB"
+uri = "file://docs/MIGRATION_PROMPT.md"
+type = "text"
+title = "迁移初始化指令 — 粘贴给新项目 AI 代理即可自动配置"

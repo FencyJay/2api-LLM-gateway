@@ -14,43 +14,29 @@
 
 ---
 
-## 迁移到新账号 — 快速配置清单
+## 迁移到新账号 — 一键 AI 配置
 
-从 GitHub 导入此项目后，**必须完成以下步骤**，否则服务无法正常运行：
+从 GitHub 导入此项目后，**把 [`docs/MIGRATION_PROMPT.md`](./docs/MIGRATION_PROMPT.md) 的全部内容粘贴给 Replit AI 代理**，它会自动完成所有配置，包括：
 
-### ✅ 第一步：启用 Replit AI Integrations
+- ✅ 自动调用 `setupReplitAIIntegrations` 注入 OpenAI 和 Anthropic 访问凭证
+- ✅ 自动生成并设置 `SESSION_SECRET`
+- ✅ 引导你设置 `PROXY_API_KEY`（唯一需要你输入的值）
+- ✅ 自动运行验证脚本、构建、测试接口
+- ✅ 提示发布上线
 
-在 Replit 左侧边栏 **Tools → Integrations** 中，分别启用：
+**整个过程你只需要：设置一个自定义的 `PROXY_API_KEY`（任意字符串），其余全部由 AI 自动完成。**
 
-1. **OpenAI** 集成 → 自动注入 `AI_INTEGRATIONS_OPENAI_BASE_URL` 和 `AI_INTEGRATIONS_OPENAI_API_KEY`
-2. **Anthropic** 集成 → 自动注入 `AI_INTEGRATIONS_ANTHROPIC_BASE_URL` 和 `AI_INTEGRATIONS_ANTHROPIC_API_KEY`
+> ⚠️ Replit AI Integrations（modelfarm）是账号级别的功能，必须在新账号里重新初始化。迁移提示词会指导 AI 自动完成此操作。
 
-> ⚠️ 这两个集成是账号级别的，必须在新账号里重新开启。代码中的 `localhost:1106/modelfarm` 地址只在启用了集成的 Replit 容器内有效。
+---
 
-### ✅ 第二步：设置 Secrets（环境变量）
+### 手动配置（如不使用 AI 代理）
 
-在 Replit 左侧边栏 **Tools → Secrets** 中，添加以下密钥：
-
-| Secret 名称 | 说明 | 示例值 |
-|---|---|---|
-| `PROXY_API_KEY` | 对外鉴权的 Bearer Token（自定义） | `my-secret-proxy-key-2024` |
-| `SESSION_SECRET` | Express session 签名密钥（随机字符串） | `any-random-string-here` |
-
-### ✅ 第三步：验证配置
-
-在 Replit Shell 中运行：
+如需手动配置，在 Shell 中运行验证脚本查看缺少哪些配置：
 
 ```bash
 node scripts/check-setup.mjs
 ```
-
-输出全部 ✅ 即配置完成。
-
-### ✅ 第四步：启动并部署
-
-1. 在工作流面板启动 `API Server` 和 `API Portal` 工作流
-2. 访问门户确认状态显示 **Online**
-3. 点击 **Publish** 发布上线
 
 ---
 
