@@ -1,0 +1,8 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "V5OTkZjqUvR08tKh0EAND"
+uri = "file://.local/prompt_for_rebuild.md"
+type = "text"
+title = "AI 反向代理网关 — 精确重建与审核修复提示词"
