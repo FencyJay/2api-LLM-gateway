@@ -6,45 +6,100 @@ const router = Router();
 
 const openaiClient = new OpenAI({
   baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
-  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY ?? "dummy",
+  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY ?? "_DUMMY_API_KEY_",
 });
 
 const anthropicClient = new Anthropic({
   baseURL: process.env.AI_INTEGRATIONS_ANTHROPIC_BASE_URL,
-  apiKey: process.env.AI_INTEGRATIONS_ANTHROPIC_API_KEY ?? "dummy",
+  apiKey: process.env.AI_INTEGRATIONS_ANTHROPIC_API_KEY ?? "_DUMMY_API_KEY_",
 });
 
-const OPENAI_MODELS = [
-  { id: "gpt-5.2", provider: "openai" },
-  { id: "gpt-5-mini", provider: "openai" },
-  { id: "gpt-5-nano", provider: "openai" },
-  { id: "o4-mini", provider: "openai" },
-  { id: "o3", provider: "openai" },
+// ─── Model registry (verified live against Replit modelfarm) ─────────────────
+export const OPENAI_MODELS = [
+  { id: "gpt-5.2",      description: "Most capable general-purpose model" },
+  { id: "gpt-5.1",      description: "Strong general-purpose model" },
+  { id: "gpt-5",        description: "GPT-5 base" },
+  { id: "gpt-5-mini",   description: "Cost-effective, high-volume tasks" },
+  { id: "gpt-5-nano",   description: "Fastest and most affordable" },
+  { id: "gpt-4.1",      description: "GPT-4.1 (legacy)" },
+  { id: "gpt-4.1-mini", description: "GPT-4.1-mini (legacy)" },
+  { id: "gpt-4.1-nano", description: "GPT-4.1-nano (legacy)" },
+  { id: "gpt-4o",       description: "GPT-4o (legacy)" },
+  { id: "gpt-4o-mini",  description: "GPT-4o-mini (legacy)" },
+  { id: "o4-mini",      description: "Thinking model for complex reasoning" },
+  { id: "o3",           description: "Most capable thinking model" },
+  { id: "o3-mini",      description: "Efficient thinking model (legacy)" },
 ];
 
-const ANTHROPIC_MODELS = [
-  { id: "claude-opus-4-6", provider: "anthropic" },
-  { id: "claude-sonnet-4-6", provider: "anthropic" },
-  { id: "claude-haiku-4-5", provider: "anthropic" },
+export const ANTHROPIC_MODELS = [
+  { id: "claude-opus-4-6",   description: "Most capable Claude, complex reasoning" },
+  { id: "claude-opus-4-5",   description: "Claude Opus 4.5" },
+  { id: "claude-opus-4-1",   description: "Claude Opus 4.1 (legacy)" },
+  { id: "claude-sonnet-4-6", description: "Balanced performance and speed" },
+  { id: "claude-sonnet-4-5", description: "Claude Sonnet 4.5" },
+  { id: "claude-haiku-4-5",  description: "Fastest Claude, simple tasks" },
 ];
 
-const ALL_MODELS = [...OPENAI_MODELS, ...ANTHROPIC_MODELS];
+const ALL_MODELS = [
+  ...OPENAI_MODELS.map((m) => ({ ...m, provider: "openai" })),
+  ...ANTHROPIC_MODELS.map((m) => ({ ...m, provider: "anthropic" })),
+];
 
-function verifyBearer(req: Request, res: Response): boolean {
-  const auth = req.headers["authorization"] ?? "";
-  const proxyKey = process.env.PROXY_API_KEY;
-  if (!proxyKey || auth !== `Bearer ${proxyKey}`) {
-    res.status(401).json({ error: { message: "Unauthorized", type: "auth_error" } });
-    return false;
-  }
-  return true;
-}
+// gpt-5+ and o-series require max_completion_tokens, not max_tokens
+const COMPLETION_TOKEN_MODELS = new Set([
+  "gpt-5.2", "gpt-5.1", "gpt-5", "gpt-5-mini", "gpt-5-nano",
+  "o4-mini", "o3", "o3-mini",
+]);
 
 function isAnthropicModel(model: string): boolean {
   return model.startsWith("claude-");
 }
 
-// Convert OpenAI tools format → Anthropic tools format
+// Fix max_tokens → max_completion_tokens for newer OpenAI models
+function fixOpenAITokenParam(
+  model: string,
+  params: Record<string, unknown>,
+): Record<string, unknown> {
+  if (COMPLETION_TOKEN_MODELS.has(model)) {
+    const { max_tokens, ...rest } = params as any;
+    if (max_tokens && !rest.max_completion_tokens) {
+      return { ...rest, max_completion_tokens: max_tokens };
+    }
+    // Drop max_tokens entirely if model doesn't support it
+    return rest;
+  }
+  return params;
+}
+
+function verifyBearer(req: Request, res: Response): boolean {
+  const auth = req.headers["authorization"] ?? "";
+  const proxyKey = process.env.PROXY_API_KEY;
+  if (!proxyKey || auth !== `Bearer ${proxyKey}`) {
+    res.status(401).json({ error: { message: "Unauthorized: invalid or missing Bearer token", type: "auth_error", code: "invalid_api_key" } });
+    return false;
+  }
+  return true;
+}
+
+function flush(res: Response) {
+  if (typeof (res as any).flush === "function") (res as any).flush();
+}
+
+function sseHeaders(res: Response) {
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no");
+  res.flushHeaders();
+}
+
+function keepaliveInterval(res: Response): ReturnType<typeof setInterval> {
+  return setInterval(() => {
+    try { res.write(": keepalive\n\n"); flush(res); } catch {}
+  }, 5000);
+}
+
+// ─── Convert OpenAI tools → Anthropic tools ──────────────────────────────────
 function openaiToolsToAnthropic(tools: OpenAI.Chat.Completions.ChatCompletionTool[]): Anthropic.Tool[] {
   return tools.map((t) => ({
     name: t.function.name,
@@ -53,7 +108,6 @@ function openaiToolsToAnthropic(tools: OpenAI.Chat.Completions.ChatCompletionToo
   }));
 }
 
-// Convert OpenAI tool_choice → Anthropic tool_choice
 function openaiToolChoiceToAnthropic(
   tc: OpenAI.Chat.Completions.ChatCompletionToolChoiceOption | undefined,
 ): Anthropic.MessageCreateParamsNonStreaming["tool_choice"] | undefined {
@@ -61,13 +115,11 @@ function openaiToolChoiceToAnthropic(
   if (tc === "auto") return { type: "auto" };
   if (tc === "none") return undefined;
   if (tc === "required") return { type: "any" };
-  if (typeof tc === "object" && tc.function) {
-    return { type: "tool", name: tc.function.name };
-  }
+  if (typeof tc === "object" && tc.function) return { type: "tool", name: tc.function.name };
   return undefined;
 }
 
-// Convert OpenAI messages → Anthropic messages + system
+// ─── Convert OpenAI messages → Anthropic messages + system ───────────────────
 function openaiMessagesToAnthropic(
   messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[],
 ): { system?: string; messages: Anthropic.MessageParam[] } {
@@ -79,99 +131,64 @@ function openaiMessagesToAnthropic(
       system = typeof msg.content === "string" ? msg.content : "";
       continue;
     }
-
     if (msg.role === "user") {
       converted.push({ role: "user", content: typeof msg.content === "string" ? msg.content : (msg.content as Anthropic.ContentBlock[]) });
       continue;
     }
-
     if (msg.role === "assistant") {
-      const contentBlocks: Anthropic.ContentBlock[] = [];
-      if (msg.content) {
-        contentBlocks.push({ type: "text", text: typeof msg.content === "string" ? msg.content : "" });
-      }
+      const blocks: Anthropic.ContentBlock[] = [];
+      if (msg.content) blocks.push({ type: "text", text: typeof msg.content === "string" ? msg.content : "" });
       if (msg.tool_calls) {
         for (const tc of msg.tool_calls) {
-          let parsedInput: Record<string, unknown> = {};
-          try { parsedInput = JSON.parse(tc.function.arguments); } catch {}
-          contentBlocks.push({ type: "tool_use", id: tc.id, name: tc.function.name, input: parsedInput });
+          let input: Record<string, unknown> = {};
+          try { input = JSON.parse(tc.function.arguments); } catch {}
+          blocks.push({ type: "tool_use", id: tc.id, name: tc.function.name, input });
         }
       }
-      converted.push({ role: "assistant", content: contentBlocks });
+      converted.push({ role: "assistant", content: blocks });
       continue;
     }
-
     if (msg.role === "tool") {
       converted.push({
         role: "user",
         content: [{ type: "tool_result", tool_use_id: msg.tool_call_id, content: typeof msg.content === "string" ? msg.content : "" }],
       });
-      continue;
     }
   }
-
   return { system, messages: converted };
 }
 
-// Convert Anthropic response → OpenAI chat completion response
-function anthropicToOpenaiResponse(msg: Anthropic.Message, model: string): OpenAI.Chat.Completions.ChatCompletion {
+// ─── Convert Anthropic response → OpenAI format ──────────────────────────────
+function anthropicToOpenAI(msg: Anthropic.Message, model: string): OpenAI.Chat.Completions.ChatCompletion {
   const toolCalls: OpenAI.Chat.Completions.ChatCompletionMessageToolCall[] = [];
-  let textContent = "";
-
-  for (const block of msg.content) {
-    if (block.type === "text") {
-      textContent += block.text;
-    } else if (block.type === "tool_use") {
-      toolCalls.push({
-        id: block.id,
-        type: "function",
-        function: { name: block.name, arguments: JSON.stringify(block.input) },
-      });
+  let text = "";
+  for (const b of msg.content) {
+    if (b.type === "text") text += b.text;
+    if (b.type === "tool_use") {
+      toolCalls.push({ id: b.id, type: "function", function: { name: b.name, arguments: JSON.stringify(b.input) } });
     }
   }
-
   const finishReason: OpenAI.Chat.Completions.ChatCompletion.Choice["finish_reason"] =
     msg.stop_reason === "tool_use" ? "tool_calls" :
-    msg.stop_reason === "end_turn" ? "stop" :
     msg.stop_reason === "max_tokens" ? "length" : "stop";
 
   return {
-    id: msg.id,
-    object: "chat.completion",
-    created: Math.floor(Date.now() / 1000),
-    model,
+    id: msg.id, object: "chat.completion", created: Math.floor(Date.now() / 1000), model,
     choices: [{
-      index: 0,
-      message: {
-        role: "assistant",
-        content: textContent || null,
-        tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
-        refusal: null,
-      },
-      finish_reason: finishReason,
-      logprobs: null,
+      index: 0, logprobs: null, finish_reason: finishReason,
+      message: { role: "assistant", content: text || null, tool_calls: toolCalls.length ? toolCalls : undefined, refusal: null },
     }],
-    usage: {
-      prompt_tokens: msg.usage.input_tokens,
-      completion_tokens: msg.usage.output_tokens,
-      total_tokens: msg.usage.input_tokens + msg.usage.output_tokens,
-    },
+    usage: { prompt_tokens: msg.usage.input_tokens, completion_tokens: msg.usage.output_tokens, total_tokens: msg.usage.input_tokens + msg.usage.output_tokens },
   };
 }
 
 // ─── GET /v1/models ───────────────────────────────────────────────────────────
 router.get("/models", (req: Request, res: Response) => {
   if (!verifyBearer(req, res)) return;
-
   const now = Math.floor(Date.now() / 1000);
   res.json({
     object: "list",
-    data: ALL_MODELS.map((m) => ({
-      id: m.id,
-      object: "model",
-      created: now,
-      owned_by: m.provider,
-    })),
+    data: ALL_MODELS.map((m) => ({ id: m.id, object: "model", created: now, owned_by: m.provider, description: m.description })),
   });
 });
 
@@ -180,152 +197,82 @@ router.post("/chat/completions", async (req: Request, res: Response) => {
   if (!verifyBearer(req, res)) return;
 
   const body = req.body as OpenAI.Chat.Completions.ChatCompletionCreateParams;
-  const { model, messages, stream, tools, tool_choice, ...rest } = body;
+  const { model, messages, stream, tools, tool_choice, ...rawRest } = body;
+  const rest = fixOpenAITokenParam(model, rawRest as Record<string, unknown>);
 
   if (!isAnthropicModel(model)) {
-    // ── OpenAI path ──
+    // ── OpenAI path ─────────────────────────────────────────────────────────
     if (stream) {
-      res.setHeader("Content-Type", "text/event-stream");
-      res.setHeader("Cache-Control", "no-cache");
-      res.setHeader("Connection", "keep-alive");
-      res.setHeader("X-Accel-Buffering", "no");
-      res.flushHeaders();
-
-      const keepalive = setInterval(() => {
-        try { res.write(": keepalive\n\n"); if (typeof (res as any).flush === "function") (res as any).flush(); } catch {}
-      }, 5000);
-
+      sseHeaders(res);
+      const ka = keepaliveInterval(res);
       try {
-        const streamResp = await openaiClient.chat.completions.create({
-          model, messages, stream: true, tools, tool_choice, ...rest,
+        const s = await openaiClient.chat.completions.create({
+          model, messages, stream: true,
+          ...(tools ? { tools } : {}), ...(tool_choice ? { tool_choice } : {}),
+          ...rest,
         } as OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming);
-
-        for await (const chunk of streamResp) {
-          res.write(`data: ${JSON.stringify(chunk)}\n\n`);
-          if (typeof (res as any).flush === "function") (res as any).flush();
-        }
+        for await (const chunk of s) { res.write(`data: ${JSON.stringify(chunk)}\n\n`); flush(res); }
         res.write("data: [DONE]\n\n");
-      } finally {
-        clearInterval(keepalive);
-        res.end();
-      }
+      } finally { clearInterval(ka); res.end(); }
     } else {
-      const result = await openaiClient.chat.completions.create({
-        model, messages, stream: false, tools, tool_choice, ...rest,
+      const r = await openaiClient.chat.completions.create({
+        model, messages, stream: false,
+        ...(tools ? { tools } : {}), ...(tool_choice ? { tool_choice } : {}),
+        ...rest,
       } as OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming);
-      res.json(result);
+      res.json(r);
     }
     return;
   }
 
-  // ── Anthropic path ──
-  const { system, messages: anthropicMessages } = openaiMessagesToAnthropic(messages);
-  const anthropicTools = tools ? openaiToolsToAnthropic(tools) : undefined;
-  const anthropicToolChoice = openaiToolChoiceToAnthropic(tool_choice);
+  // ── Anthropic path ──────────────────────────────────────────────────────────
+  const { system, messages: aMessages } = openaiMessagesToAnthropic(messages);
+  const aTools = tools ? openaiToolsToAnthropic(tools) : undefined;
+  const aToolChoice = openaiToolChoiceToAnthropic(tool_choice);
   const maxTokens = (rest as any).max_tokens ?? (rest as any).max_completion_tokens ?? 8192;
 
   const baseParams: Anthropic.MessageCreateParamsNonStreaming = {
-    model,
-    messages: anthropicMessages,
-    max_tokens: maxTokens,
+    model, messages: aMessages, max_tokens: maxTokens,
     ...(system ? { system } : {}),
-    ...(anthropicTools ? { tools: anthropicTools } : {}),
-    ...(anthropicToolChoice ? { tool_choice: anthropicToolChoice } : {}),
+    ...(aTools ? { tools: aTools } : {}),
+    ...(aToolChoice ? { tool_choice: aToolChoice } : {}),
   };
 
   if (stream) {
-    res.setHeader("Content-Type", "text/event-stream");
-    res.setHeader("Cache-Control", "no-cache");
-    res.setHeader("Connection", "keep-alive");
-    res.setHeader("X-Accel-Buffering", "no");
-    res.flushHeaders();
-
-    const keepalive = setInterval(() => {
-      try { res.write(": keepalive\n\n"); if (typeof (res as any).flush === "function") (res as any).flush(); } catch {}
-    }, 5000);
-
+    sseHeaders(res);
+    const ka = keepaliveInterval(res);
     try {
       const msgId = `chatcmpl-${Date.now()}`;
       const created = Math.floor(Date.now() / 1000);
-      let toolCallIndex = 0;
-      const toolCallIdMap: Record<number, string> = {};
+      let toolCallIdx = 0;
 
-      // Send initial role chunk
-      res.write(`data: ${JSON.stringify({
-        id: msgId, object: "chat.completion.chunk", created, model,
-        choices: [{ index: 0, delta: { role: "assistant", content: "" }, finish_reason: null }],
-      })}\n\n`);
-      if (typeof (res as any).flush === "function") (res as any).flush();
+      res.write(`data: ${JSON.stringify({ id: msgId, object: "chat.completion.chunk", created, model, choices: [{ index: 0, delta: { role: "assistant", content: "" }, finish_reason: null }] })}\n\n`);
+      flush(res);
 
-      const streamResp = anthropicClient.messages.stream({ ...baseParams, stream: true } as Anthropic.MessageStreamParams);
-
-      for await (const event of streamResp) {
-        if (event.type === "content_block_start") {
-          if (event.content_block.type === "tool_use") {
-            const idx = event.index;
-            toolCallIdMap[idx] = event.content_block.id;
-            const chunk = {
-              id: msgId, object: "chat.completion.chunk", created, model,
-              choices: [{
-                index: 0,
-                delta: {
-                  tool_calls: [{
-                    index: toolCallIndex++,
-                    id: event.content_block.id,
-                    type: "function",
-                    function: { name: event.content_block.name, arguments: "" },
-                  }],
-                },
-                finish_reason: null,
-              }],
-            };
-            res.write(`data: ${JSON.stringify(chunk)}\n\n`);
-            if (typeof (res as any).flush === "function") (res as any).flush();
-          }
+      const s = anthropicClient.messages.stream(baseParams as Anthropic.MessageStreamParams);
+      for await (const event of s) {
+        if (event.type === "content_block_start" && event.content_block.type === "tool_use") {
+          res.write(`data: ${JSON.stringify({ id: msgId, object: "chat.completion.chunk", created, model, choices: [{ index: 0, delta: { tool_calls: [{ index: toolCallIdx++, id: event.content_block.id, type: "function", function: { name: event.content_block.name, arguments: "" } }] }, finish_reason: null }] })}\n\n`);
+          flush(res);
         } else if (event.type === "content_block_delta") {
           if (event.delta.type === "text_delta") {
-            const chunk = {
-              id: msgId, object: "chat.completion.chunk", created, model,
-              choices: [{ index: 0, delta: { content: event.delta.text }, finish_reason: null }],
-            };
-            res.write(`data: ${JSON.stringify(chunk)}\n\n`);
-            if (typeof (res as any).flush === "function") (res as any).flush();
+            res.write(`data: ${JSON.stringify({ id: msgId, object: "chat.completion.chunk", created, model, choices: [{ index: 0, delta: { content: event.delta.text }, finish_reason: null }] })}\n\n`);
+            flush(res);
           } else if (event.delta.type === "input_json_delta") {
-            const idx = event.index;
-            const chunk = {
-              id: msgId, object: "chat.completion.chunk", created, model,
-              choices: [{
-                index: 0,
-                delta: { tool_calls: [{ index: idx, function: { arguments: event.delta.partial_json } }] },
-                finish_reason: null,
-              }],
-            };
-            res.write(`data: ${JSON.stringify(chunk)}\n\n`);
-            if (typeof (res as any).flush === "function") (res as any).flush();
+            res.write(`data: ${JSON.stringify({ id: msgId, object: "chat.completion.chunk", created, model, choices: [{ index: 0, delta: { tool_calls: [{ index: event.index, function: { arguments: event.delta.partial_json } }] }, finish_reason: null }] })}\n\n`);
+            flush(res);
           }
         } else if (event.type === "message_delta") {
-          const finishReason =
-            event.delta.stop_reason === "tool_use" ? "tool_calls" :
-            event.delta.stop_reason === "end_turn" ? "stop" :
-            event.delta.stop_reason === "max_tokens" ? "length" : "stop";
-          const chunk = {
-            id: msgId, object: "chat.completion.chunk", created, model,
-            choices: [{ index: 0, delta: {}, finish_reason: finishReason }],
-          };
-          res.write(`data: ${JSON.stringify(chunk)}\n\n`);
-          if (typeof (res as any).flush === "function") (res as any).flush();
+          const fr = event.delta.stop_reason === "tool_use" ? "tool_calls" : event.delta.stop_reason === "max_tokens" ? "length" : "stop";
+          res.write(`data: ${JSON.stringify({ id: msgId, object: "chat.completion.chunk", created, model, choices: [{ index: 0, delta: {}, finish_reason: fr }] })}\n\n`);
+          flush(res);
         }
       }
-
       res.write("data: [DONE]\n\n");
-    } finally {
-      clearInterval(keepalive);
-      res.end();
-    }
+    } finally { clearInterval(ka); res.end(); }
   } else {
-    // Non-streaming: use stream internally to avoid 10-min timeout
-    const finalMsg = await anthropicClient.messages.stream(baseParams as Anthropic.MessageStreamParams).finalMessage();
-    res.json(anthropicToOpenaiResponse(finalMsg, model));
+    const final = await anthropicClient.messages.stream(baseParams as Anthropic.MessageStreamParams).finalMessage();
+    res.json(anthropicToOpenAI(final, model));
   }
 });
 
@@ -337,233 +284,161 @@ router.post("/messages", async (req: Request, res: Response) => {
   const { model, stream } = body;
 
   if (isAnthropicModel(model)) {
-    // ── Anthropic path: pass through ──
+    // ── Anthropic native pass-through ────────────────────────────────────────
     if (stream) {
-      res.setHeader("Content-Type", "text/event-stream");
-      res.setHeader("Cache-Control", "no-cache");
-      res.setHeader("Connection", "keep-alive");
-      res.setHeader("X-Accel-Buffering", "no");
-      res.flushHeaders();
-
-      const keepalive = setInterval(() => {
-        try { res.write(": keepalive\n\n"); if (typeof (res as any).flush === "function") (res as any).flush(); } catch {}
-      }, 5000);
-
+      sseHeaders(res);
+      const ka = keepaliveInterval(res);
       try {
-        const anthropicStream = anthropicClient.messages.stream(body as Anthropic.MessageStreamParams);
-        for await (const event of anthropicStream) {
-          res.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
-          if (typeof (res as any).flush === "function") (res as any).flush();
-        }
-      } finally {
-        clearInterval(keepalive);
-        res.end();
-      }
+        const s = anthropicClient.messages.stream(body as Anthropic.MessageStreamParams);
+        for await (const event of s) { res.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`); flush(res); }
+      } finally { clearInterval(ka); res.end(); }
     } else {
-      const finalMsg = await anthropicClient.messages.stream(body as Anthropic.MessageStreamParams).finalMessage();
-      res.json(finalMsg);
+      const final = await anthropicClient.messages.stream(body as Anthropic.MessageStreamParams).finalMessage();
+      res.json(final);
     }
     return;
   }
 
-  // ── OpenAI model via /v1/messages ──
-  // Convert Anthropic format → OpenAI
-  const openaiMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [];
-
+  // ── OpenAI model via /v1/messages (Anthropic format in, OpenAI out, Anthropic format back) ──
+  const oaMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [];
   if (body.system) {
-    const sysContent = typeof body.system === "string" ? body.system : body.system.map((b) => (b.type === "text" ? b.text : "")).join("");
-    openaiMessages.push({ role: "system", content: sysContent });
+    const sys = typeof body.system === "string" ? body.system : (body.system as Anthropic.TextBlockParam[]).map((b) => b.text).join("");
+    oaMessages.push({ role: "system", content: sys });
   }
 
   for (const msg of body.messages) {
     if (msg.role === "user") {
-      const content = typeof msg.content === "string"
-        ? msg.content
-        : msg.content.map((b) => {
-            if (b.type === "text") return b.text;
-            if (b.type === "tool_result") return typeof b.content === "string" ? b.content : "";
-            return "";
-          }).join("");
-      // Handle tool_result blocks as tool messages
       if (typeof msg.content !== "string") {
-        const toolResults = (msg.content as Anthropic.ToolResultBlockParam[]).filter((b) => b.type === "tool_result");
+        const toolResults = (msg.content as Anthropic.ContentBlockParam[]).filter((b) => b.type === "tool_result") as Anthropic.ToolResultBlockParam[];
         if (toolResults.length > 0) {
           for (const tr of toolResults) {
-            openaiMessages.push({
-              role: "tool",
-              tool_call_id: tr.tool_use_id,
-              content: typeof tr.content === "string" ? tr.content : "",
-            });
+            oaMessages.push({ role: "tool", tool_call_id: tr.tool_use_id, content: typeof tr.content === "string" ? tr.content : "" });
           }
           continue;
         }
+        const text = (msg.content as Anthropic.ContentBlockParam[]).map((b) => b.type === "text" ? b.text : "").join("");
+        oaMessages.push({ role: "user", content: text });
+      } else {
+        oaMessages.push({ role: "user", content: msg.content });
       }
-      openaiMessages.push({ role: "user", content });
     } else if (msg.role === "assistant") {
       const toolCalls: OpenAI.Chat.Completions.ChatCompletionMessageToolCall[] = [];
-      let textContent = "";
+      let text = "";
       if (typeof msg.content === "string") {
-        textContent = msg.content;
+        text = msg.content;
       } else {
-        for (const b of msg.content) {
-          if (b.type === "text") textContent += b.text;
+        for (const b of msg.content as Anthropic.ContentBlockParam[]) {
+          if (b.type === "text") text += b.text;
           if (b.type === "tool_use") {
-            toolCalls.push({ id: b.id, type: "function", function: { name: b.name, arguments: JSON.stringify(b.input) } });
+            const tb = b as Anthropic.ToolUseBlockParam;
+            toolCalls.push({ id: tb.id, type: "function", function: { name: tb.name, arguments: JSON.stringify(tb.input) } });
           }
         }
       }
-      openaiMessages.push({
-        role: "assistant",
-        content: textContent || null,
-        tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
-      } as OpenAI.Chat.Completions.ChatCompletionMessageParam);
+      oaMessages.push({ role: "assistant", content: text || null, tool_calls: toolCalls.length ? toolCalls : undefined } as OpenAI.Chat.Completions.ChatCompletionMessageParam);
     }
   }
 
-  // Convert tools
-  let openaiTools: OpenAI.Chat.Completions.ChatCompletionTool[] | undefined;
-  if (body.tools) {
-    openaiTools = body.tools.map((t) => ({
-      type: "function" as const,
-      function: { name: t.name, description: t.description ?? "", parameters: t.input_schema as Record<string, unknown> },
-    }));
-  }
-
-  // Convert tool_choice
-  let openaiToolChoice: OpenAI.Chat.Completions.ChatCompletionToolChoiceOption | undefined;
+  const oaTools = body.tools?.map((t) => ({ type: "function" as const, function: { name: t.name, description: t.description ?? "", parameters: t.input_schema as Record<string, unknown> } }));
+  let oaToolChoice: OpenAI.Chat.Completions.ChatCompletionToolChoiceOption | undefined;
   if (body.tool_choice) {
     const tc = body.tool_choice;
-    if (tc.type === "auto") openaiToolChoice = "auto";
-    else if (tc.type === "any") openaiToolChoice = "required";
-    else if (tc.type === "tool") openaiToolChoice = { type: "function", function: { name: (tc as Anthropic.ToolChoiceToolParam).name } };
+    if (tc.type === "auto") oaToolChoice = "auto";
+    else if (tc.type === "any") oaToolChoice = "required";
+    else if (tc.type === "tool") oaToolChoice = { type: "function", function: { name: (tc as Anthropic.ToolChoiceToolParam).name } };
   }
 
   const maxTokens = body.max_tokens ?? 8192;
+  const fixedParams = fixOpenAITokenParam(model, { max_tokens: maxTokens });
 
   if (stream) {
-    res.setHeader("Content-Type", "text/event-stream");
-    res.setHeader("Cache-Control", "no-cache");
-    res.setHeader("Connection", "keep-alive");
-    res.setHeader("X-Accel-Buffering", "no");
-    res.flushHeaders();
-
-    const keepalive = setInterval(() => {
-      try { res.write(": keepalive\n\n"); if (typeof (res as any).flush === "function") (res as any).flush(); } catch {}
-    }, 5000);
-
+    sseHeaders(res);
+    const ka = keepaliveInterval(res);
     try {
       const msgId = `msg_${Date.now()}`;
-      const inputTokensEst = Math.ceil(JSON.stringify(openaiMessages).length / 4);
+      const estInput = Math.ceil(JSON.stringify(oaMessages).length / 4);
 
-      // message_start
-      res.write(`event: message_start\ndata: ${JSON.stringify({
-        type: "message_start",
-        message: { id: msgId, type: "message", role: "assistant", content: [], model, stop_reason: null, stop_sequence: null, usage: { input_tokens: inputTokensEst, output_tokens: 0 } },
-      })}\n\n`);
-
-      // content_block_start for text
+      res.write(`event: message_start\ndata: ${JSON.stringify({ type: "message_start", message: { id: msgId, type: "message", role: "assistant", content: [], model, stop_reason: null, stop_sequence: null, usage: { input_tokens: estInput, output_tokens: 0 } } })}\n\n`);
       res.write(`event: content_block_start\ndata: ${JSON.stringify({ type: "content_block_start", index: 0, content_block: { type: "text", text: "" } })}\n\n`);
-      if (typeof (res as any).flush === "function") (res as any).flush();
+      flush(res);
 
-      const openaiStream = await openaiClient.chat.completions.create({
-        model, messages: openaiMessages, stream: true, max_tokens: maxTokens,
-        ...(openaiTools ? { tools: openaiTools } : {}),
-        ...(openaiToolChoice ? { tool_choice: openaiToolChoice } : {}),
+      const s = await openaiClient.chat.completions.create({
+        model, messages: oaMessages, stream: true,
+        ...(oaTools ? { tools: oaTools } : {}), ...(oaToolChoice ? { tool_choice: oaToolChoice } : {}),
+        ...fixedParams,
       } as OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming);
 
-      let outputTokens = 0;
-      let textIndex = 0;
-      const toolBlocks: Record<number, { id: string; name: string; args: string; blockIndex: number }> = {};
-      let nextBlockIndex = 1;
+      let outTokens = 0;
+      let textBlockClosed = false;
+      const toolBlocks: Record<number, { id: string; name: string; blockIndex: number }> = {};
+      let nextBlockIdx = 1;
 
-      for await (const chunk of openaiStream) {
-        const choice = chunk.choices[0];
-        if (!choice) continue;
-
-        const delta = choice.delta;
-        if (delta.content) {
-          outputTokens += Math.ceil(delta.content.length / 4);
-          res.write(`event: content_block_delta\ndata: ${JSON.stringify({ type: "content_block_delta", index: textIndex, delta: { type: "text_delta", text: delta.content } })}\n\n`);
-          if (typeof (res as any).flush === "function") (res as any).flush();
+      for await (const chunk of s) {
+        const d = chunk.choices[0]?.delta;
+        if (!d) continue;
+        if (d.content) {
+          outTokens += Math.ceil(d.content.length / 4);
+          res.write(`event: content_block_delta\ndata: ${JSON.stringify({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: d.content } })}\n\n`);
+          flush(res);
         }
-
-        if (delta.tool_calls) {
-          for (const tc of delta.tool_calls) {
-            const tIdx = tc.index ?? 0;
-            if (!toolBlocks[tIdx]) {
-              const blockIndex = nextBlockIndex++;
-              toolBlocks[tIdx] = { id: tc.id ?? "", name: tc.function?.name ?? "", args: "", blockIndex };
-              // Close text block first if we haven't
-              res.write(`event: content_block_stop\ndata: ${JSON.stringify({ type: "content_block_stop", index: textIndex })}\n\n`);
-              // Start tool_use block
-              res.write(`event: content_block_start\ndata: ${JSON.stringify({ type: "content_block_start", index: blockIndex, content_block: { type: "tool_use", id: tc.id ?? "", name: tc.function?.name ?? "", input: {} } })}\n\n`);
-              if (typeof (res as any).flush === "function") (res as any).flush();
-            } else if (tc.id) {
-              toolBlocks[tIdx].id = tc.id;
+        if (d.tool_calls) {
+          for (const tc of d.tool_calls) {
+            const ti = tc.index ?? 0;
+            if (!toolBlocks[ti]) {
+              if (!textBlockClosed) {
+                res.write(`event: content_block_stop\ndata: ${JSON.stringify({ type: "content_block_stop", index: 0 })}\n\n`);
+                textBlockClosed = true;
+              }
+              const bi = nextBlockIdx++;
+              toolBlocks[ti] = { id: tc.id ?? "", name: tc.function?.name ?? "", blockIndex: bi };
+              res.write(`event: content_block_start\ndata: ${JSON.stringify({ type: "content_block_start", index: bi, content_block: { type: "tool_use", id: tc.id ?? "", name: tc.function?.name ?? "", input: {} } })}\n\n`);
+              flush(res);
             }
-            if (tc.function?.name) toolBlocks[tIdx].name += tc.function.name;
             if (tc.function?.arguments) {
-              toolBlocks[tIdx].args += tc.function.arguments;
-              res.write(`event: content_block_delta\ndata: ${JSON.stringify({ type: "content_block_delta", index: toolBlocks[tIdx].blockIndex, delta: { type: "input_json_delta", partial_json: tc.function.arguments } })}\n\n`);
-              if (typeof (res as any).flush === "function") (res as any).flush();
+              res.write(`event: content_block_delta\ndata: ${JSON.stringify({ type: "content_block_delta", index: toolBlocks[ti].blockIndex, delta: { type: "input_json_delta", partial_json: tc.function.arguments } })}\n\n`);
+              flush(res);
             }
           }
         }
-
-        if (choice.finish_reason) {
-          const stopReason = choice.finish_reason === "tool_calls" ? "tool_use" : choice.finish_reason === "length" ? "max_tokens" : "end_turn";
-          // Close all open blocks
+        if (chunk.choices[0]?.finish_reason) {
+          const stopReason = chunk.choices[0].finish_reason === "tool_calls" ? "tool_use" : chunk.choices[0].finish_reason === "length" ? "max_tokens" : "end_turn";
           for (const tb of Object.values(toolBlocks)) {
             res.write(`event: content_block_stop\ndata: ${JSON.stringify({ type: "content_block_stop", index: tb.blockIndex })}\n\n`);
           }
-          if (Object.keys(toolBlocks).length === 0) {
-            res.write(`event: content_block_stop\ndata: ${JSON.stringify({ type: "content_block_stop", index: textIndex })}\n\n`);
+          if (!textBlockClosed && Object.keys(toolBlocks).length === 0) {
+            res.write(`event: content_block_stop\ndata: ${JSON.stringify({ type: "content_block_stop", index: 0 })}\n\n`);
           }
-          res.write(`event: message_delta\ndata: ${JSON.stringify({ type: "message_delta", delta: { stop_reason: stopReason, stop_sequence: null }, usage: { output_tokens: outputTokens } })}\n\n`);
+          res.write(`event: message_delta\ndata: ${JSON.stringify({ type: "message_delta", delta: { stop_reason: stopReason, stop_sequence: null }, usage: { output_tokens: outTokens } })}\n\n`);
           res.write(`event: message_stop\ndata: ${JSON.stringify({ type: "message_stop" })}\n\n`);
-          if (typeof (res as any).flush === "function") (res as any).flush();
+          flush(res);
         }
       }
-    } finally {
-      clearInterval(keepalive);
-      res.end();
-    }
+    } finally { clearInterval(ka); res.end(); }
   } else {
-    const result = await openaiClient.chat.completions.create({
-      model, messages: openaiMessages, stream: false, max_tokens: maxTokens,
-      ...(openaiTools ? { tools: openaiTools } : {}),
-      ...(openaiToolChoice ? { tool_choice: openaiToolChoice } : {}),
+    const r = await openaiClient.chat.completions.create({
+      model, messages: oaMessages, stream: false,
+      ...(oaTools ? { tools: oaTools } : {}), ...(oaToolChoice ? { tool_choice: oaToolChoice } : {}),
+      ...fixedParams,
     } as OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming);
 
-    const choice = result.choices[0];
-    const contentBlocks: Anthropic.ContentBlock[] = [];
-
-    if (choice.message.content) {
-      contentBlocks.push({ type: "text", text: choice.message.content });
-    }
+    const choice = r.choices[0];
+    const blocks: Anthropic.ContentBlock[] = [];
+    if (choice.message.content) blocks.push({ type: "text", text: choice.message.content });
     if (choice.message.tool_calls) {
       for (const tc of choice.message.tool_calls) {
         let input: Record<string, unknown> = {};
         try { input = JSON.parse(tc.function.arguments); } catch {}
-        contentBlocks.push({ type: "tool_use", id: tc.id, name: tc.function.name, input });
+        blocks.push({ type: "tool_use", id: tc.id, name: tc.function.name, input });
       }
     }
-
     const stopReason: Anthropic.Message["stop_reason"] =
-      choice.finish_reason === "tool_calls" ? "tool_use" :
-      choice.finish_reason === "length" ? "max_tokens" : "end_turn";
+      choice.finish_reason === "tool_calls" ? "tool_use" : choice.finish_reason === "length" ? "max_tokens" : "end_turn";
 
-    const anthropicResp: Anthropic.Message = {
-      id: result.id,
-      type: "message",
-      role: "assistant",
-      content: contentBlocks,
-      model,
-      stop_reason: stopReason,
-      stop_sequence: null,
-      usage: { input_tokens: result.usage?.prompt_tokens ?? 0, output_tokens: result.usage?.completion_tokens ?? 0 },
-    };
-    res.json(anthropicResp);
+    res.json({
+      id: r.id, type: "message", role: "assistant", content: blocks, model,
+      stop_reason: stopReason, stop_sequence: null,
+      usage: { input_tokens: r.usage?.prompt_tokens ?? 0, output_tokens: r.usage?.completion_tokens ?? 0 },
+    } as Anthropic.Message);
   }
 });
 
