@@ -74,6 +74,38 @@ curl $BASE/v1/chat/completions \
 
 ---
 
+## 跨平台环境变量适配
+
+本项目的 AI 上游连接依赖 4 个环境变量。**不同平台的命名约定不同**，迁移时必须适配。
+
+代码位置：`artifacts/api-server/src/routes/proxy.ts` 顶部的 `new OpenAI()` 和 `new Anthropic()` 初始化。
+
+### 变量对照表
+
+| 作用 | Replit 命名（当前） | 标准命名（官方 SDK 默认） | 说明 |
+|------|---------------------|--------------------------|------|
+| OpenAI 接口地址 | `AI_INTEGRATIONS_OPENAI_BASE_URL` | `OPENAI_BASE_URL` | 官方默认 `https://api.openai.com/v1` |
+| OpenAI 密钥 | `AI_INTEGRATIONS_OPENAI_API_KEY` | `OPENAI_API_KEY` | `sk-` 开头 |
+| Anthropic 接口地址 | `AI_INTEGRATIONS_ANTHROPIC_BASE_URL` | `ANTHROPIC_BASE_URL` | 官方默认 `https://api.anthropic.com` |
+| Anthropic 密钥 | `AI_INTEGRATIONS_ANTHROPIC_API_KEY` | `ANTHROPIC_API_KEY` | `sk-ant-` 开头 |
+| 网关鉴权 | `PROXY_API_KEY` | `PROXY_API_KEY` | 通用，无需改 |
+
+### 适配指南
+
+**迁移到非 Replit 平台时**，需要修改 `proxy.ts` 中读取环境变量的代码，将 `AI_INTEGRATIONS_*` 替换为当前平台的命名，或改为标准命名并添加 fallback：
+
+```ts
+// 推荐写法：优先标准命名，fallback 到 Replit 命名，两个平台都能跑
+const openaiClient = new OpenAI({
+  baseURL: process.env.OPENAI_BASE_URL ?? process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
+  apiKey:  process.env.OPENAI_API_KEY  ?? process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
+});
+```
+
+> **给 AI 代理的指令：** 当你在非 Replit 环境中部署此项目时，检测当前平台提供的环境变量命名，修改 `artifacts/api-server/src/routes/proxy.ts` 中 `new OpenAI()` 和 `new Anthropic()` 的环境变量引用，使其匹配当前平台。核心逻辑和协议转换代码无需改动。
+
+---
+
 ## 技术栈
 
 - **Runtime:** Node.js + TypeScript

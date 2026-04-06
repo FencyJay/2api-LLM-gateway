@@ -16,9 +16,11 @@ Express 5 server serving:
 
 Auth: `Authorization: Bearer $PROXY_API_KEY`
 
-AI backends via Replit AI Integrations (no user API key needed):
+AI backends via environment variables (see `proxy.ts` top-level client init):
 - OpenAI: `AI_INTEGRATIONS_OPENAI_BASE_URL` + `AI_INTEGRATIONS_OPENAI_API_KEY`
 - Anthropic: `AI_INTEGRATIONS_ANTHROPIC_BASE_URL` + `AI_INTEGRATIONS_ANTHROPIC_API_KEY`
+
+> **跨平台适配：** 上述 `AI_INTEGRATIONS_*` 是 Replit 平台特有命名。在非 Replit 环境部署时，需将 `artifacts/api-server/src/routes/proxy.ts` 中的环境变量引用改为当前平台的命名（通用标准为 `OPENAI_BASE_URL` / `OPENAI_API_KEY` / `ANTHROPIC_BASE_URL` / `ANTHROPIC_API_KEY`），或添加 fallback 兼容多平台。详见 README.md「跨平台环境变量适配」章节。
 
 Key packages: `openai@^6`, `@anthropic-ai/sdk@^0.82`
 
