@@ -20,33 +20,33 @@ function checkConfig() {
   const checks: Array<{ key: string; hint: string; required: boolean }> = [
     {
       key: "AI_INTEGRATIONS_OPENAI_BASE_URL",
-      hint: "请在 Replit Tools → Integrations 中启用 OpenAI 集成",
-      required: true,
+      hint: "未设置则默认为 http://localhost:1106/modelfarm/openai",
+      required: false,
     },
     {
       key: "AI_INTEGRATIONS_OPENAI_API_KEY",
-      hint: "请在 Replit Tools → Integrations 中启用 OpenAI 集成",
-      required: true,
+      hint: "未设置则默认为 _DUMMY_API_KEY_",
+      required: false,
     },
     {
       key: "AI_INTEGRATIONS_ANTHROPIC_BASE_URL",
-      hint: "请在 Replit Tools → Integrations 中启用 Anthropic 集成",
-      required: true,
+      hint: "未设置则默认为 http://localhost:1106/modelfarm/anthropic",
+      required: false,
     },
     {
       key: "AI_INTEGRATIONS_ANTHROPIC_API_KEY",
-      hint: "请在 Replit Tools → Integrations 中启用 Anthropic 集成",
-      required: true,
+      hint: "未设置则默认为 _DUMMY_API_KEY_",
+      required: false,
     },
     {
       key: "PROXY_API_KEY",
-      hint: "请在 Replit Tools → Secrets 中设置 PROXY_API_KEY（对外鉴权的 Bearer Token）",
-      required: true,
+      hint: "请在 Replit Tools → Secrets 中设置 PROXY_API_KEY（对外鉴权的 Bearer Token），未设置则默认为 codebear",
+      required: false,
     },
   ];
 
   const missing = checks.filter((c) => !process.env[c.key]);
-  const errors  = missing.filter((c) => c.required);
+  const errors = missing.filter((c) => c.required);
 
   if (errors.length > 0) {
     logger.warn("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
@@ -60,10 +60,13 @@ function checkConfig() {
     logger.warn("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
   } else {
     logger.info("✓ 所有必要配置项检查通过");
-    logger.info({
-      openaiBase: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
-      anthropicBase: process.env.AI_INTEGRATIONS_ANTHROPIC_BASE_URL,
-    }, "AI Integrations 已就绪");
+    logger.info(
+      {
+        openaiBase: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
+        anthropicBase: process.env.AI_INTEGRATIONS_ANTHROPIC_BASE_URL,
+      },
+      "AI Integrations 已就绪",
+    );
   }
 }
 
