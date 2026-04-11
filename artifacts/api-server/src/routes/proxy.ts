@@ -11,11 +11,36 @@ const openaiClient = new OpenAI({
   apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY || "_DUMMY_API_KEY_",
 });
 
+// 不兼容字段黑名单：SDK 自动注入但 Modelfarm 不支持的字段
+const ANTHROPIC_UNSUPPORTED_FIELDS = [
+  "output_config",
+  "context_management",
+  "betas",
+];
+
+// 自定义 fetch 拦截器：在请求发出前删除不兼容字段
+function anthropicFetch(
+  url: string | URL | globalThis.Request,
+  init?: globalThis.RequestInit,
+): Promise<globalThis.Response> {
+  if (init?.body && typeof init.body === "string") {
+    try {
+      const body = JSON.parse(init.body);
+      for (const field of ANTHROPIC_UNSUPPORTED_FIELDS) {
+        delete body[field];
+      }
+      init = { ...init, body: JSON.stringify(body) };
+    } catch {}
+  }
+  return globalThis.fetch(url, init);
+}
+
 const anthropicClient = new Anthropic({
   baseURL:
     process.env.AI_INTEGRATIONS_ANTHROPIC_BASE_URL ||
     "http://localhost:1106/modelfarm/anthropic",
   apiKey: process.env.AI_INTEGRATIONS_ANTHROPIC_API_KEY || "_DUMMY_API_KEY_",
+  fetch: anthropicFetch,
 });
 
 // ─── Model registry (verified live against Replit modelfarm) ─────────────────
@@ -85,9 +110,11 @@ function fixOpenAITokenParam(
 }
 
 function verifyBearer(req: Request, res: Response): boolean {
-  const auth = req.headers["authorization"] ?? "";
   const proxyKey = process.env.PROXY_API_KEY || "codebear";
-  if (!proxyKey || auth !== `Bearer ${proxyKey}`) {
+  const auth = req.headers["authorization"] ?? "";
+  const xApiKey = (req.headers["x-api-key"] as string) ?? "";
+  const valid = auth === `Bearer ${proxyKey}` || xApiKey === proxyKey;
+  if (!valid) {
     res.status(401).json({
       error: {
         message: "Unauthorized: invalid or missing Bearer token",
@@ -349,10 +376,11 @@ router.post("/chat/completions", async (req: Request, res: Response) => {
       );
       flush(res);
 
-      const s = anthropicClient.messages.stream(
-        baseParams as Anthropic.MessageStreamParams,
-      );
-      for await (const event of s) {
+      const rawStream = await anthropicClient.messages.create({
+        ...baseParams,
+        stream: true,
+      } as Anthropic.MessageCreateParamsStreaming);
+      for await (const event of rawStream) {
         if (
           event.type === "content_block_start" &&
           event.content_block.type === "tool_use"
@@ -392,9 +420,10 @@ router.post("/chat/completions", async (req: Request, res: Response) => {
       res.end();
     }
   } else {
-    const final = await anthropicClient.messages
-      .stream(baseParams as Anthropic.MessageStreamParams)
-      .finalMessage();
+    const final = await anthropicClient.messages.create({
+      ...baseParams,
+      stream: false,
+    } as Anthropic.MessageCreateParamsNonStreaming);
     res.json(anthropicToOpenAI(final, model));
   }
 });
@@ -414,10 +443,11 @@ router.post("/messages", async (req: Request, res: Response) => {
       sseHeaders(res);
       const ka = keepaliveInterval(res);
       try {
-        const s = anthropicClient.messages.stream(
-          body as Anthropic.MessageStreamParams,
-        );
-        for await (const event of s) {
+        const rawStream = await anthropicClient.messages.create({
+          ...body,
+          stream: true,
+        } as Anthropic.MessageCreateParamsStreaming);
+        for await (const event of rawStream) {
           res.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
           flush(res);
         }
@@ -426,9 +456,10 @@ router.post("/messages", async (req: Request, res: Response) => {
         res.end();
       }
     } else {
-      const final = await anthropicClient.messages
-        .stream(body as Anthropic.MessageStreamParams)
-        .finalMessage();
+      const final = await anthropicClient.messages.create({
+        ...body,
+        stream: false,
+      } as Anthropic.MessageCreateParamsNonStreaming);
       res.json(final);
     }
     return;
