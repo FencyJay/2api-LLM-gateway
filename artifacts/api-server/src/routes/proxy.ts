@@ -44,32 +44,48 @@ const anthropicClient = new Anthropic({
 });
 
 // ─── Model registry (verified live against Replit modelfarm) ─────────────────
-export const OPENAI_MODELS = [
-  { id: "gpt-5.2", description: "Most capable general-purpose model" },
-  { id: "gpt-5.1", description: "Strong general-purpose model" },
+type ModelEntry = {
+  id: string;
+  description: string;
+  modality?: "chat" | "audio" | "image";
+};
+
+export const OPENAI_MODELS: ModelEntry[] = [
+  // ── 通用聊天（首选） ──
+  { id: "gpt-5.4", description: "最强通用模型，非编程任务首选" },
+  { id: "gpt-5.3-codex", description: "最强编程模型" },
+  { id: "gpt-5.2", description: "GPT-5.2" },
+  { id: "gpt-5.2-codex", description: "GPT-5.2 编程版" },
+  { id: "gpt-5.1", description: "GPT-5.1" },
   { id: "gpt-5", description: "GPT-5 base" },
-  { id: "gpt-5-mini", description: "Cost-effective, high-volume tasks" },
-  { id: "gpt-5-nano", description: "Fastest and most affordable" },
+  { id: "gpt-5-mini", description: "高并发、性价比高" },
+  { id: "gpt-5-nano", description: "最快最便宜" },
+  // ── 旧版 4.x（一般不建议用） ──
   { id: "gpt-4.1", description: "GPT-4.1 (legacy)" },
   { id: "gpt-4.1-mini", description: "GPT-4.1-mini (legacy)" },
   { id: "gpt-4.1-nano", description: "GPT-4.1-nano (legacy)" },
   { id: "gpt-4o", description: "GPT-4o (legacy)" },
   { id: "gpt-4o-mini", description: "GPT-4o-mini (legacy)" },
-  { id: "o4-mini", description: "Thinking model for complex reasoning" },
-  { id: "o3", description: "Most capable thinking model" },
+  // ── 推理 ──
+  { id: "o4-mini", description: "推理模型，复杂逻辑首选" },
+  { id: "o3", description: "更强但更慢的推理模型" },
   { id: "o3-mini", description: "Efficient thinking model (legacy)" },
+  // ── 语音（仅注册到 /v1/models，未路由专用端点） ──
+  { id: "gpt-audio", description: "语音模型（暂未路由专用端点）", modality: "audio" },
+  { id: "gpt-audio-mini", description: "语音模型 mini（暂未路由专用端点）", modality: "audio" },
+  { id: "gpt-4o-mini-transcribe", description: "语音转写（暂未路由专用端点）", modality: "audio" },
+  // ── 图像（仅注册到 /v1/models，未路由专用端点） ──
+  { id: "gpt-image-1", description: "图像生成（暂未路由专用端点）", modality: "image" },
 ];
 
-export const ANTHROPIC_MODELS = [
-  {
-    id: "claude-opus-4-6",
-    description: "Most capable Claude, complex reasoning",
-  },
-  { id: "claude-opus-4-5", description: "Claude Opus 4.5" },
+export const ANTHROPIC_MODELS: ModelEntry[] = [
+  { id: "claude-opus-4-7", description: "最强 Opus，复杂推理/编程首选" },
+  { id: "claude-opus-4-6", description: "Claude Opus 4.6 (legacy)" },
+  { id: "claude-opus-4-5", description: "Claude Opus 4.5 (legacy)" },
   { id: "claude-opus-4-1", description: "Claude Opus 4.1 (legacy)" },
-  { id: "claude-sonnet-4-6", description: "Balanced performance and speed" },
-  { id: "claude-sonnet-4-5", description: "Claude Sonnet 4.5" },
-  { id: "claude-haiku-4-5", description: "Fastest Claude, simple tasks" },
+  { id: "claude-sonnet-4-6", description: "平衡型，日常使用首推" },
+  { id: "claude-sonnet-4-5", description: "Claude Sonnet 4.5 (legacy)" },
+  { id: "claude-haiku-4-5", description: "最快最轻量" },
 ];
 
 const ALL_MODELS = [
@@ -79,7 +95,10 @@ const ALL_MODELS = [
 
 // gpt-5+ and o-series require max_completion_tokens, not max_tokens
 const COMPLETION_TOKEN_MODELS = new Set([
+  "gpt-5.4",
+  "gpt-5.3-codex",
   "gpt-5.2",
+  "gpt-5.2-codex",
   "gpt-5.1",
   "gpt-5",
   "gpt-5-mini",
