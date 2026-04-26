@@ -82,38 +82,17 @@ curl -s -X POST http://localhost:8080/v1/chat/completions \
 
 ---
 
-## 接口 / 模型映射 / 技术栈
+## 接口 / 模型 / 技术栈
 
 - `POST /v1/chat/completions` — OpenAI 兼容（调 Claude 型号会自动转换）
 - `POST /v1/messages` — Anthropic 原生（调 GPT 型号会自动转换）
-- `GET /v1/models` — 全部已映射型号·`GET /api/healthz`
+- `GET /v1/models` · `GET /api/healthz`
 
-### OpenAI（通用聊天首选 gpt-5.4，编程首选 gpt-5.3-codex）
+### 模型列表（名字与上游严格对应）
 
-| 型号 | 说明 |
-|---|---|
-| `gpt-5.4` | 最强通用，非编程任务首选 |
-| `gpt-5.3-codex` | 最强编程模型 |
-| `gpt-5.2` / `gpt-5.2-codex` | GPT-5.2 与编程版 |
-| `gpt-5.1` / `gpt-5` | GPT-5 系 |
-| `gpt-5-mini` | 高并发、性价比高 |
-| `gpt-5-nano` | 最快最便宜 |
-| `gpt-4.1` / `gpt-4.1-mini` / `gpt-4.1-nano` / `gpt-4o` / `gpt-4o-mini` | 旧版，一般不建议用 |
-| `o4-mini` | 推理模型，复杂逻辑首选 |
-| `o3` | 更强但更慢的推理模型 |
-| `o3-mini` | 旧版推理 |
-| `gpt-audio` / `gpt-audio-mini` / `gpt-4o-mini-transcribe` | 语音（仅注册到 `/v1/models`，未路由专用端点） |
-| `gpt-image-1` | 图像（同上） |
+OpenAI：`gpt-5.4`、`gpt-5.3-codex`、`gpt-5.2`、`gpt-5.2-codex`、`gpt-5.1`、`gpt-5`、`gpt-5-mini`、`gpt-5-nano`、`gpt-4.1`、`gpt-4.1-mini`、`gpt-4.1-nano`、`gpt-4o`、`gpt-4o-mini`、`o4-mini`、`o3`、`o3-mini`、`gpt-audio`、`gpt-audio-mini`、`gpt-4o-mini-transcribe`、`gpt-image-1`
 
-### Anthropic（复杂推理/编程首选 claude-opus-4-7）
-
-| 型号 | 说明 |
-|---|---|
-| `claude-opus-4-7` | 最强 Opus，复杂推理/编程首选 |
-| `claude-opus-4-6` / `claude-opus-4-5` / `claude-opus-4-1` | 旧版 Opus |
-| `claude-sonnet-4-6` | 平衡型，日常使用首推 |
-| `claude-sonnet-4-5` | 旧版 Sonnet |
-| `claude-haiku-4-5` | 最快最轻量 |
+Anthropic：`claude-opus-4-7`、`claude-opus-4-6`、`claude-opus-4-5`、`claude-opus-4-1`、`claude-sonnet-4-6`、`claude-sonnet-4-5`、`claude-haiku-4-5`
 
 路由逻辑在 `artifacts/api-server/src/routes/proxy.ts`：`claude-*` 走 Anthropic 上游，其余走 OpenAI 上游；gpt-5+/o 系自动将 `max_tokens` 改为 `max_completion_tokens`。
 
