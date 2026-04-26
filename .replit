@@ -4,6 +4,9 @@ modules = ["nodejs-24"]
 id = "artifacts/api-server"
 
 [[artifacts]]
+id = "artifacts/api-portal"
+
+[[artifacts]]
 id = "artifacts/mockup-sandbox"
 
 [deployment]

@@ -38,11 +38,6 @@ function checkConfig() {
       hint: "未设置则默认为 _DUMMY_API_KEY_",
       required: false,
     },
-    {
-      key: "PROXY_API_KEY",
-      hint: "请在 Replit Tools → Secrets 中设置 PROXY_API_KEY（对外鉴权的 Bearer Token），未设置则默认为 codebear",
-      required: false,
-    },
   ];
 
   const missing = checks.filter((c) => !process.env[c.key]);
@@ -56,7 +51,7 @@ function checkConfig() {
       logger.warn(`     → ${e.hint}`);
     }
     logger.warn("   完整配置指南: node scripts/check-setup.mjs");
-    logger.warn("   文档: docs/REBUILD_GUIDE.md");
+    logger.warn("   文档: README.md／docs/REBUILD_GUIDE.md");
     logger.warn("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
   } else {
     logger.info("✓ 所有必要配置项检查通过");

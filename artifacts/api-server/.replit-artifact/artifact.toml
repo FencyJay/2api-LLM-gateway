@@ -2,7 +2,7 @@ kind = "api"
 previewPath = "/api"
 title = "API Server"
 version = "1.0.0"
-id = "3B4_FFSkEVBkAeYMFRJ2e"
+id = "artifacts/api-server"
 
 [[services]]
 localPort = 8080

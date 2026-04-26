@@ -55,20 +55,9 @@ console.log();
 // ─── 2. 自定义 Secrets ────────────────────────────────────────────────────────
 console.log(`${BOLD}[2] Secrets（环境变量）${RESET}`);
 
-const proxyKey     = process.env.PROXY_API_KEY;
 const sessionSecret = process.env.SESSION_SECRET;
 
-if (proxyKey && proxyKey.length >= 8) {
-  ok(`PROXY_API_KEY 已设置（长度 ${proxyKey.length} 位）`);
-} else if (proxyKey) {
-  warn(`PROXY_API_KEY 已设置，但长度较短（${proxyKey.length} 位），建议 16 位以上`);
-  hasWarn = true;
-} else {
-  fail("PROXY_API_KEY 未设置！");
-  info("请前往 Replit 左侧 Tools → Secrets → 添加 PROXY_API_KEY");
-  info("值为你自定义的 Bearer Token，例如: my-secret-key-2024");
-  hasError = true;
-}
+ok("PROXY_API_KEY 已在代码中写死为 \"codebear\"（不再读环境变量）");
 
 if (sessionSecret && sessionSecret.length >= 8) {
   ok(`SESSION_SECRET 已设置（长度 ${sessionSecret.length} 位）`);

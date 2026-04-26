@@ -110,7 +110,8 @@ function fixOpenAITokenParam(
 }
 
 function verifyBearer(req: Request, res: Response): boolean {
-  const proxyKey = process.env.PROXY_API_KEY || "codebear";
+  // 鉴权密钥写死：导入任何 Replit 账号均为 `codebear`，不走环境变量
+  const proxyKey = "codebear";
   const auth = req.headers["authorization"] ?? "";
   const xApiKey = (req.headers["x-api-key"] as string) ?? "";
   const valid = auth === `Bearer ${proxyKey}` || xApiKey === proxyKey;
